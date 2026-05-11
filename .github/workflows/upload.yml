@@ -1,0 +1,67 @@
+name: دانلود، تقسیم و آپلود خودکار فایل بزرگ
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_url:
+        description: 'لینک مستقیم فایل برای دانلود'
+        required: true
+        default: 'https://example.com/largefile.zip'
+        type: string
+      part_size:
+        description: 'اندازه هر قطعه (مثلا 90M یا 100M)'
+        required: false
+        default: '90M'
+        type: string
+
+jobs:
+  process-large-file:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: آماده‌سازی محیط
+        run: |
+          echo "شروع کار"
+          df -h .
+
+      - name: دریافت فایل از لینک مستقیم
+        run: |
+          echo "دانلود از: ${{ github.event.inputs.file_url }}"
+          curl -L -o "original_file.bin" "${{ github.event.inputs.file_url }}"
+          echo "دانلود تمام شد"
+          ls -lh original_file.bin
+
+      - name: تقسیم فایل به قطعات
+        run: |
+          echo "تقسیم فایل به قطعات ${{ github.event.inputs.part_size }}"
+          split -b ${{ github.event.inputs.part_size }} original_file.bin "part_"
+          echo "تقسیم انجام شد"
+          ls -lh part_*
+
+      - name: ایجاد Release جدید
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "upload-${{ github.run_id }}"
+          name: "آپلود خودکار - ${{ github.run_id }}"
+          body: |
+            قطعات فایل بزرگ
+            
+            لینک اصلی: ${{ github.event.inputs.file_url }}
+            
+            نحوه ترکیب: همه قطعات را دانلود کرده و در ترمینال بنویسید:
+            cat part_* > فایل_نهایی.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: آپلود همه قطعه‌ها به Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "upload-${{ github.run_id }}"
+          files: part_*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
