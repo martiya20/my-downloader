@@ -6,7 +6,7 @@ on:
       file_url:
         description: 'لینک مستقیم فایل برای دانلود'
         required: true
-        default: 'https://cdn.cnbj1.fds.api.mi-img.com/mibook-drivers/APP/XiaoaiAgent/20260421/XiaoaiAgent_V2.1.0.315.zip'
+        default: 'https://example.com/largefile.zip'
         type: string
       part_size:
         description: 'اندازه هر قطعه (مثلا 90M یا 100M)'
@@ -26,17 +26,10 @@ jobs:
           echo "شروع کار"
           df -h .
 
-      - name: دریافت فایل از لینک مستقیم (با هدرهای شبیه مرورگر)
+      - name: دریافت فایل از لینک مستقیم
         run: |
           echo "دانلود از: ${{ github.event.inputs.file_url }}"
-          curl -L -o "original_file.bin" "${{ github.event.inputs.file_url }}" \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -H "Referer: https://www.mi.com/" \
-            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" \
-            -H "Accept-Language: en-US,en;q=0.5" \
-            --retry 3 \
-            --retry-delay 2 \
-            --max-time 600
+          curl -L -o "original_file.bin" "${{ github.event.inputs.file_url }}"
           echo "دانلود تمام شد"
           ls -lh original_file.bin
 
