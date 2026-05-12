@@ -1,9 +1,9 @@
-name: 🚀 دانلود و آپلود حرفه‌ای فایل بزرگ
+name: 🚀 دانلود و آپلود حرفه‌ای فایل بزرگ (نسخه نهایی)
 
 on:
   workflow_dispatch:
     inputs:
-      file_id:
+      file_url:
         description: '🔗 لینک گوگل درایو یا File ID'
         required: true
         default: '1iph61BI_iCiM_cTXfzDc98ktcngkspb1'
@@ -20,15 +20,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: 🧰 نصب ابزارهای ضروری و به‌روز
+      - name: 🧰 نصب ابزارهای لازم
         run: |
-          # نصب gdown با آخرین نسخه و یک اسکریپت قوی دانلود
+          sudo apt-get update
+          sudo apt-get install -y wget unzip
           pip install --upgrade gdown
 
-      - name: 🧠 استخراج File ID از لینک
+      - name: 🧠 استخراج File ID از هر نوع لینک گوگل
         id: extract-id
         run: |
-          INPUT="${{ github.event.inputs.file_id }}"
+          INPUT="${{ github.event.inputs.file_url }}"
+          # پشتیبانی از لینک‌های مختلف گوگل درایو
           if [[ "$INPUT" =~ /file/d/([a-zA-Z0-9_-]+) ]]; then
             FILE_ID="${BASH_REMATCH[1]}"
           elif [[ "$INPUT" =~ id=([a-zA-Z0-9_-]+) ]]; then
@@ -36,61 +38,86 @@ jobs:
           elif [[ "$INPUT" =~ ^[a-zA-Z0-9_-]+$ ]]; then
             FILE_ID="$INPUT"
           else
-            echo "❌ فرمت ورودی نامعتبر است."
+            echo "❌ فرمت ورودی نامعتبر است. لطفاً File ID یا لینک استاندارد drive.google.com را وارد کنید."
             exit 1
           fi
           echo "FILE_ID=$FILE_ID" >> $GITHUB_OUTPUT
           echo "✅ File ID استخراج شد: $FILE_ID"
 
-      - name: 🌟 دانلود هوشمند فایل (روش ترکیبی)
+      - name: 🌟 دانلود هوشمند با روش ۳ مرحله‌ای (مقاوم در برابر تأیید گوگل)
         run: |
           FILE_ID="${{ steps.extract-id.outputs.FILE_ID }}"
-          echo "🎯 شروع دانلود با روش پیشرفته..."
+          echo "🎯 شروع دانلود فایل با شناسه: $FILE_ID"
           
-          # دانلود به روش curl و gdown ترکیبی برای اطمینان بالا
-          if gdown "https://drive.google.com/uc?id=${FILE_ID}" -O "original_file.bin" --fuzzy --no-check-certificate --continue; then
-            echo "✅ دانلود با gdown انجام شد."
+          # مرحله 1: تلاش با gdown (بدون گزینه --fuzzy که مشکل دارد)
+          echo "🔹 مرحله 1 - تلاش با gdown..."
+          if gdown "https://drive.google.com/uc?id=${FILE_ID}" -O "original_file.bin" --no-check-certificate; then
+            echo "✅ دانلود با gdown موفقیت‌آمیز بود."
           else
-            echo "⚠️ gdown با مشکل مواجه شد، تلاش با روش مرحله‌ای..."
-            # روش پیشرفته داینامیک token به صورت مرحله‌ای
-            COOKIE_FILE="/tmp/gdrive_cookies.txt"
-            # دریافت صفحه اولیه برای گرفتن token
-            curl -c "$COOKIE_FILE" -s -L "https://drive.google.com/uc?export=download&id=${FILE_ID}" > /tmp/intermediate.html
-            # استخراج confirm token
-            CONFIRM=$(grep -o 'confirm=[^&]*' /tmp/intermediate.html | head -1 | cut -d '=' -f2)
+            echo "⚠️ gdown موفق نبود، مرحله 2 - روش پیشرفته curl با کوکی..."
+            # مرحله 2: روش curl با مدیریت confirm token
+            # ایجاد پوشه موقت
+            mkdir -p /tmp/gdrive
+            COOKIE_FILE="/tmp/gdrive/cookies.txt"
+            
+            # دریافت صفحه هشدار و استخراج confirm token به روش قوی‌تر
+            curl -c "$COOKIE_FILE" -s -L "https://drive.google.com/uc?export=download&id=${FILE_ID}" > /tmp/gdrive/warning.html
+            
+            # استخراج confirm token با الگوی دقیق‌تر
+            CONFIRM=$(grep -oP 'confirm=([^&]+)' /tmp/gdrive/warning.html | head -1 | cut -d '=' -f2)
+            
             if [ -n "$CONFIRM" ]; then
-              echo "✅ token استخراج شد: $CONFIRM"
-              curl -Lb "$COOKIE_FILE" "https://drive.google.com/uc?export=download&confirm=${CONFIRM}&id=${FILE_ID}" -o "original_file.bin"
-            else
-              # در صورت عدم موفقیت، روش مستقیم
-              echo "⚠️ token یافت نشد، دانلود مستقیم..."
-              curl -L "https://drive.google.com/uc?export=download&id=${FILE_ID}" -o "original_file.bin" \
+              echo "✅ confirm token استخراج شد: $CONFIRM"
+              # دانلود فایل واقعی با استفاده از token
+              curl -L -b "$COOKIE_FILE" "https://drive.google.com/uc?export=download&confirm=${CONFIRM}&id=${FILE_ID}" -o "original_file.bin" \
                 -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            else
+              echo "⚠️ token یافت نشد، مرحله 3 - تلاش با wget (آخرین راه)..."
+              # مرحله 3: روش wget با mimick مرورگر
+              wget --no-check-certificate --load-cookies "$COOKIE_FILE" \
+                "https://drive.google.com/uc?export=download&id=${FILE_ID}" -O "original_file.bin" \
+                --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             fi
           fi
-
-      - name: 🔪 بررسی و تقسیم فایل به قطعات
-        run: |
-          if [ ! -f "original_file.bin" ] || [ $(stat -c%s "original_file.bin") -lt 1000000 ]; then
-            echo "❌ خطا: فایل دانلود نشد یا حجم آن بسیار کم است."
+          
+          # بررسی نهایی حجم فایل
+          if [ ! -f "original_file.bin" ]; then
+            echo "❌ فایل دانلود نشد."
             exit 1
           fi
-          echo "✂️ تقسیم فایل (حجم واقعی: $(du -h original_file.bin | cut -f1))"
+          
+          FILE_SIZE=$(stat -c%s "original_file.bin")
+          if [ $FILE_SIZE -lt 5000000 ]; then
+            echo "❌ فایل دانلود شده خیلی کوچک است (کمتر از 5 مگابایت). احتمالاً صفحه هشدار گوگل دانلود شده است."
+            echo "محتوای فایل:"
+            head -n 5 original_file.bin
+            exit 1
+          fi
+          
+          echo "✅ دانلود موفقیت‌آمیز. حجم فایل: $(du -h original_file.bin | cut -f1)"
+
+      - name: 🔪 تقسیم فایل به قطعات
+        run: |
+          echo "✂️ تقسیم فایل به قطعات ${{ github.event.inputs.part_size }}..."
           split -b ${{ github.event.inputs.part_size }} -d -a 3 original_file.bin "part_"
-          echo "✅ تعداد قطعات ایجاد شده: $(ls part_* | wc -l)"
+          PART_COUNT=$(ls part_* | wc -l)
+          echo "✅ تعداد قطعات ایجاد شده: $PART_COUNT"
+          ls -lh part_* | head -5
 
       - name: ☁️ آپلود قطعات به GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "upload-auto-${{ github.run_id }}"
-          name: "📂 دانلود خودکار - ${{ github.run_id }}"
+          tag_name: "release-${{ github.run_id }}"
+          name: "📦 فایل آپلود شده - ${{ github.run_id }}"
           body: |
-            ### 📁 فایل آپلود شده به روش خودکار
-            - **منبع:** Google Drive
+            ### 📁 اطلاعات آپلود خودکار
+            - **شناسه فایل گوگل درایو:** `${{ steps.extract-id.outputs.FILE_ID }}`
             - **اندازه هر قطعه:** ${{ github.event.inputs.part_size }}
-            - **تاریخ آپلود:** $(date)
-            - **نحوه بازیابی فایل اصلی:** تمام قطعات `part_*` را دانلود کرده و با دستور `cat part_* > file.zip` ترکیب کنید.
-          files: part_*
-          fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            - **تاریخ آپلود:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            
+            ### 🔧 نحوه بازیابی فایل اصلی
+            1. همه فایل‌های `part_*` را دانلود کنید.
+            2. آن‌ها را در یک پوشه قرار دهید.
+            3. در ترمینال (لینوکس/مک) اجرا کنید:
+               ```bash
+               cat part_* > فایل_نهایی.zip
