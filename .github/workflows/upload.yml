@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       file_url:
-        description: 'لینک مستقیم فایل برای دانلود'
+        description: 'لینک مستقیم (یا لینک گوگل درایو)'
         required: true
-        default: 'https://google.com'
+        default: 'https://drive.usercontent.google.com/download?id=1iph61BI_iCiM_cTXfzDc98ktcngkspb1&export=download'
         type: string
       part_size:
         description: 'اندازه هر قطعه (مثلا 90M یا 100M)'
@@ -25,26 +25,58 @@ jobs:
         run: |
           echo "شروع کار"
           df -h .
+          echo "نصب ابزارهای لازم..."
+          sudo apt-get update
+          sudo apt-get install -y python3-pip
+          pip3 install --upgrade gdown
 
-      - name: دریافت فایل از لینک مستقیم (با هدرهای شبیه مرورگر)
+      - name: تشخیص نوع لینک و دانلود فایل
+        id: download
         run: |
-          echo "دانلود از: ${{ github.event.inputs.file_url }}"
-          curl -L -o "original_file.bin" "${{ github.event.inputs.file_url }}" \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -H "Referer: https://www.mi.com/" \
-            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" \
-            -H "Accept-Language: en-US,en;q=0.5" \
-            --retry 3 \
-            --retry-delay 2 \
-            --max-time 600
-          echo "دانلود تمام شد"
+          URL="${{ github.event.inputs.file_url }}"
+          echo "لینک وارد شده: $URL"
+          
+          # بررسی لینک گوگل درایو
+          if [[ "$URL" == *"drive.google.com"* ]] || [[ "$URL" == *"drive.usercontent.google.com"* ]] || [[ "$URL" == *"docs.google.com"* ]]; then
+            echo "🔍 شناسایی لینک گوگل درایو – استفاده از gdown"
+            # استخراج FILE_ID از لینک
+            if [[ "$URL" == *"id="* ]]; then
+              FILE_ID=$(echo "$URL" | grep -oP '(?<=id=)[^&]+')
+            else
+              echo "❌ نمی‌توانم FILE_ID را از لینک گوگل استخراج کنم. لطفاً لینک استاندارد drive.google.com/file/d/... را وارد کنید."
+              exit 1
+            fi
+            echo "FILE_ID: $FILE_ID"
+            gdown "https://drive.google.com/uc?id=$FILE_ID" -O "original_file.bin" --fuzzy
+            if [ $? -ne 0 ]; then
+              echo "❌ دانلود با gdown شکست خورد. شاید فایل عمومی نیست یا محدودیت دانلود دارد."
+              exit 1
+            fi
+          else
+            echo "🌐 لینک مستقیم معمولی – استفاده از curl با هدرهای شبیه مرورگر"
+            curl -L -o "original_file.bin" "$URL" \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+              -H "Referer: https://www.google.com/" \
+              -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" \
+              -H "Accept-Language: en-US,en;q=0.5" \
+              --retry 5 \
+              --retry-delay 3 \
+              --max-time 1800
+            if [ $? -ne 0 ]; then
+              echo "❌ دانلود با curl شکست خورد. لطفاً لینک را بررسی کنید."
+              exit 1
+            fi
+          fi
+          
+          echo "✅ دانلود انجام شد. حجم فایل:"
           ls -lh original_file.bin
 
       - name: تقسیم فایل به قطعات
         run: |
-          echo "تقسیم فایل به قطعات ${{ github.event.inputs.part_size }}"
+          echo "✂️ تقسیم فایل به قطعات ${{ github.event.inputs.part_size }}"
           split -b ${{ github.event.inputs.part_size }} original_file.bin "part_"
-          echo "تقسیم انجام شد"
+          echo "✅ تقسیم انجام شد. تعداد قطعات:"
+          ls -lh part_* | wc -l
           ls -lh part_*
 
       - name: ایجاد Release جدید
@@ -54,21 +86,12 @@ jobs:
           tag_name: "upload-${{ github.run_id }}"
           name: "آپلود خودکار - ${{ github.run_id }}"
           body: |
-            قطعات فایل بزرگ
+            ### قطعات فایل بزرگ
+            - **لینک اصلی:** `${{ github.event.inputs.file_url }}`
+            - **اندازه هر قطعه:** ${{ github.event.inputs.part_size }}
+            - **تعداد قطعات:** (لیست زیر)
             
-            لینک اصلی: ${{ github.event.inputs.file_url }}
-            
-            نحوه ترکیب: همه قطعات را دانلود کرده و در ترمینال بنویسید:
-            cat part_* > فایل_نهایی.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: آپلود همه قطعه‌ها به Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "upload-${{ github.run_id }}"
-          files: part_*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            **نحوه ترکیب:** تمام قطعات را دانلود کرده و در ترمینال (یا Command Prompt) بنویسید:
+            ```bash
+            cat part_* > فایل_نهایی.zip   # لینوکس/مک
+            copy /b part_* فایل_نهایی.zip  # ویندوز
