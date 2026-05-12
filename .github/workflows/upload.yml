@@ -1,18 +1,15 @@
-name: دانلود، تقسیم و آپلود خودکار فایل بزرگ (Google Drive با gdown)
+name: "دانلود، تقسیم و آپلود خودکار فایل از گوگل درایو"
 
 on:
   workflow_dispatch:
     inputs:
       file_id:
-        description: 'شناسه (ID) یا لینک کامل فایل در Google Drive'
+        description: 'شناسه فایل در گوگل درایو (مثل 1iph61BI_iCiM_cTXfzDc98ktcngkspb1)'
         required: true
-        default: '1iph61BI_iCiM_cTXfzDc98ktcngkspb1'
-        type: string
       part_size:
-        description: 'اندازه هر قطعه (مثلاً 95M برای فایل ۶ گیگابایتی)'
+        description: 'اندازه هر قطعه (مثلاً 95M)'
         required: false
         default: '95M'
-        type: string
 
 jobs:
   process-large-file:
@@ -21,39 +18,70 @@ jobs:
       contents: write
 
     steps:
-      - name: آماده‌سازی محیط و نصب آخرین نسخه gdown
+      # مرحله 1: نصب ابزارهای مورد نیاز
+      - name: نصب ابزارهای مورد نیاز
         run: |
-          echo "🔄 به‌روزرسانی pip و نصب آخرین نسخه gdown..."
-          python -m pip install --upgrade pip
-          pip install --upgrade gdown
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip
+          pip3 install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
-      - name: دریافت فایل از Google Drive با gdown
+      # مرحله 2: دانلود فایل با استفاده از Google Drive API
+      - name: دریافت فایل از گوگل درایو
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
         run: |
-          echo "🎯 شروع دانلود فایل..."
-          # از --fuzzy برای استخراج خودکار ID از لینک استفاده می‌کنیم
-          gdown --fuzzy "${{ github.event.inputs.file_id }}" -O "original_file.bin" --continue
-          echo "✅ دانلود با موفقیت انجام شد. حجم فایل:"
-          ls -lh original_file.bin
+          echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/gcloud-key.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcloud-key.json
 
+          python3 - <<EOF
+          import io
+          import os
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaIoBaseDownload
+          from google.oauth2 import service_account
+
+          print("شروع دانلود...")
+          SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+          credentials = service_account.Credentials.from_service_account_file(
+              os.environ['GOOGLE_APPLICATION_CREDENTIALS'], scopes=SCOPES)
+          service = build('drive', 'v3', credentials=credentials)
+
+          file_id = '${{ github.event.inputs.file_id }}'
+          request = service.files().get_media(fileId=file_id)
+          fh = io.BytesIO()
+          downloader = MediaIoBaseDownload(fh, request, chunksize=50 * 1024 * 1024)
+
+          done = False
+          while not done:
+              status, done = downloader.next_chunk()
+              if status:
+                  print(f"\rپیشرفت دانلود: {int(status.progress() * 100)}%", end="")
+          print("\nدانلود کامل شد.")
+
+          with open("original_file.bin", "wb") as f:
+              f.write(fh.getvalue())
+          EOF
+
+      # مرحله 3: تقسیم فایل به قطعات
       - name: تقسیم فایل به قطعات
         run: |
-          echo "✂️ تقسیم فایل به قطعات ${{ github.event.inputs.part_size }}..."
-          split -b ${{ github.event.inputs.part_size }} original_file.bin "part_"
-          echo "✅ تقسیم انجام شد. تعداد قطعات ایجاد شده: $(ls part_* | wc -l)"
-          ls -lh part_*
+          echo "تقسیم فایل به قطعات ${{ github.event.inputs.part_size }}..."
+          split -b ${{ github.event.inputs.part_size }} -d -a 3 original_file.bin "part_"
+          echo "تقسیم انجام شد. تعداد قطعات: $(ls part_* | wc -l)"
 
-      - name: ایجاد Release جدید
-        id: create_release
+      # مرحله 4: آپلود قطعات به GitHub Release
+      - name: آپلود قطعات به Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "upload-${{ github.run_id }}"
-          name: "آپلود خودکار - ${{ github.run_id }}"
+          name: "خروجی دانلود خودکار - ${{ github.run_id }}"
           body: |
-            ### 🎉 قطعات فایل بزرگ با موفقیت آپلود شد!
+            دانلود خودکار از گوگل درایو!
+            شناسه فایل اصلی: `${{ github.event.inputs.file_id }}`
 
-            - **شناسه یا لینک منبع:** `${{ github.event.inputs.file_id }}`
-            - **اندازه هر قطعه:** ${{ github.event.inputs.part_size }}
-
-            **نحوه ترکیب قطعات و بازسازی فایل اصلی:**
-            ```bash
-            cat part_* > فایل_نهایی.zip
+            برای بازسازی فایل اصلی، تمام قطعات را دانلود کرده و در ترمینال اجرا کنید:
+            `cat part_* > فایل_نهایی.zip`
+          files: part_*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
