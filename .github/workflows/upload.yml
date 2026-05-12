@@ -3,10 +3,10 @@ name: دانلود، تقسیم و آپلود خودکار فایل بزرگ (Go
 on:
   workflow_dispatch:
     inputs:
-      file_url_or_id:
-        description: 'لینک کامل یا شناسه (ID) فایل در گوگل درایو'
+      file_id:
+        description: 'شناسه (ID) یا لینک کامل فایل در Google Drive'
         required: true
-        default: 'https://drive.google.com/file/d/1iph61BI_iCiM_cTXfzDc98ktcngkspb1/view?usp=sharing'
+        default: '1iph61BI_iCiM_cTXfzDc98ktcngkspb1'
         type: string
       part_size:
         description: 'اندازه هر قطعه (مثلاً 95M برای فایل ۶ گیگابایتی)'
@@ -21,24 +21,25 @@ jobs:
       contents: write
 
     steps:
-      - name: آماده‌سازی محیط و نصب gdown
+      - name: آماده‌سازی محیط و نصب آخرین نسخه gdown
         run: |
-          echo "شروع کار – نصب gdown"
-          pip install gdown
+          echo "🔄 به‌روزرسانی pip و نصب آخرین نسخه gdown..."
+          python -m pip install --upgrade pip
+          pip install --upgrade gdown
 
-      - name: دریافت فایل از گوگل درایو با gdown
+      - name: دریافت فایل از Google Drive با gdown
         run: |
-          echo "دانلود از: ${{ github.event.inputs.file_url_or_id }}"
-          # gdown به طور خودکار لینک کامل یا شناسه را تشخیص می‌دهد
-          gdown --fuzzy "${{ github.event.inputs.file_url_or_id }}" -O "original_file.bin" --continue
-          echo "دانلود تمام شد"
+          echo "🎯 شروع دانلود فایل..."
+          # از --fuzzy برای استخراج خودکار ID از لینک استفاده می‌کنیم
+          gdown --fuzzy "${{ github.event.inputs.file_id }}" -O "original_file.bin" --continue
+          echo "✅ دانلود با موفقیت انجام شد. حجم فایل:"
           ls -lh original_file.bin
 
       - name: تقسیم فایل به قطعات
         run: |
-          echo "تقسیم فایل به قطعات ${{ github.event.inputs.part_size }}"
+          echo "✂️ تقسیم فایل به قطعات ${{ github.event.inputs.part_size }}..."
           split -b ${{ github.event.inputs.part_size }} original_file.bin "part_"
-          echo "تقسیم انجام شد – تعداد قطعات: $(ls part_* | wc -l)"
+          echo "✅ تقسیم انجام شد. تعداد قطعات ایجاد شده: $(ls part_* | wc -l)"
           ls -lh part_*
 
       - name: ایجاد Release جدید
@@ -48,11 +49,11 @@ jobs:
           tag_name: "upload-${{ github.run_id }}"
           name: "آپلود خودکار - ${{ github.run_id }}"
           body: |
-            ### قطعات فایل بزرگ
-            
-            **لینک یا شناسه منبع:** `${{ github.event.inputs.file_url_or_id }}`
-            **اندازه هر قطعه:** ${{ github.event.inputs.part_size }}
-            
-            **نحوه ترکیب قطعات (در ترمینال):**
+            ### 🎉 قطعات فایل بزرگ با موفقیت آپلود شد!
+
+            - **شناسه یا لینک منبع:** `${{ github.event.inputs.file_id }}`
+            - **اندازه هر قطعه:** ${{ github.event.inputs.part_size }}
+
+            **نحوه ترکیب قطعات و بازسازی فایل اصلی:**
             ```bash
             cat part_* > فایل_نهایی.zip
