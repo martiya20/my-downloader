@@ -1,17 +1,17 @@
-name: دانلود، تقسیم و آپلود خودکار فایل بزرگ
+name: دانلود، تقسیم و آپلود خودکار فایل بزرگ (Google Drive با gdown)
 
 on:
   workflow_dispatch:
     inputs:
-      file_url:
-        description: 'لینک مستقیم فایل برای دانلود'
+      file_url_or_id:
+        description: 'لینک کامل یا شناسه (ID) فایل در گوگل درایو'
         required: true
-        default: 'https://example.com/largefile.zip'
+        default: 'https://drive.google.com/file/d/1iph61BI_iCiM_cTXfzDc98ktcngkspb1/view?usp=sharing'
         type: string
       part_size:
-        description: 'اندازه هر قطعه (مثلا 90M یا 100M)'
+        description: 'اندازه هر قطعه (مثلاً 95M برای فایل ۶ گیگابایتی)'
         required: false
-        default: '90M'
+        default: '95M'
         type: string
 
 jobs:
@@ -21,15 +21,16 @@ jobs:
       contents: write
 
     steps:
-      - name: آماده‌سازی محیط
+      - name: آماده‌سازی محیط و نصب gdown
         run: |
-          echo "شروع کار"
-          df -h .
+          echo "شروع کار – نصب gdown"
+          pip install gdown
 
-      - name: دریافت فایل از لینک مستقیم
+      - name: دریافت فایل از گوگل درایو با gdown
         run: |
-          echo "دانلود از: ${{ github.event.inputs.file_url }}"
-          curl -L -o "original_file.bin" "${{ github.event.inputs.file_url }}"
+          echo "دانلود از: ${{ github.event.inputs.file_url_or_id }}"
+          # gdown به طور خودکار لینک کامل یا شناسه را تشخیص می‌دهد
+          gdown --fuzzy "${{ github.event.inputs.file_url_or_id }}" -O "original_file.bin" --continue
           echo "دانلود تمام شد"
           ls -lh original_file.bin
 
@@ -37,7 +38,7 @@ jobs:
         run: |
           echo "تقسیم فایل به قطعات ${{ github.event.inputs.part_size }}"
           split -b ${{ github.event.inputs.part_size }} original_file.bin "part_"
-          echo "تقسیم انجام شد"
+          echo "تقسیم انجام شد – تعداد قطعات: $(ls part_* | wc -l)"
           ls -lh part_*
 
       - name: ایجاد Release جدید
@@ -47,21 +48,11 @@ jobs:
           tag_name: "upload-${{ github.run_id }}"
           name: "آپلود خودکار - ${{ github.run_id }}"
           body: |
-            قطعات فایل بزرگ
+            ### قطعات فایل بزرگ
             
-            لینک اصلی: ${{ github.event.inputs.file_url }}
+            **لینک یا شناسه منبع:** `${{ github.event.inputs.file_url_or_id }}`
+            **اندازه هر قطعه:** ${{ github.event.inputs.part_size }}
             
-            نحوه ترکیب: همه قطعات را دانلود کرده و در ترمینال بنویسید:
+            **نحوه ترکیب قطعات (در ترمینال):**
+            ```bash
             cat part_* > فایل_نهایی.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: آپلود همه قطعه‌ها به Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "upload-${{ github.run_id }}"
-          files: part_*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
